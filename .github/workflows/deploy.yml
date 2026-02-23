@@ -135,20 +135,13 @@ jobs:
             SERVICE="$(resolve_service "${SERVICE_EXPECTED}" "dashboard")" || true
 
             if [ -z "${SERVICE}" ]; then
-              echo "⚠️ Serviço não encontrado (${SERVICE_EXPECTED}). Criando stack 'dash-tg' (primeira vez)..."
-
-              COMPOSE_FILE="/tmp/dash-tg-compose.yml"
-              printf 'version: "3.8"\n\nservices:\n  dashboard:\n    image: "%s:latest"\n    networks:\n      - network_public\n    deploy:\n      replicas: 1\n      restart_policy:\n        condition: on-failure\n      labels:\n        - traefik.enable=true\n        - traefik.docker.network=network_public\n        - "traefik.http.routers.dash_tg.rule=Host(\\`dash-tg.arvsystems.cloud\\`)"\n        - traefik.http.routers.dash_tg.entrypoints=websecure\n        - traefik.http.routers.dash_tg.tls.certresolver=letsencryptresolver\n        - traefik.http.services.dash_tg.loadbalancer.server.port=8501\n\nnetworks:\n  network_public:\n    external: true\n' "${IMAGE}" > "${COMPOSE_FILE}"
-
-              docker stack deploy -c "${COMPOSE_FILE}" --with-registry-auth dash-tg
-              rm -f "${COMPOSE_FILE}"
-
-              sleep 5
-              SERVICE="$(resolve_service "${SERVICE_EXPECTED}" "dashboard")" || {
-                echo "❌ Stack criada, mas o serviço ainda não apareceu. Serviços disponíveis:"
-                docker service ls
-                exit 1
-              }
+              echo "❌ Stack 'dash-tg' não existe. Crie no Portainer primeiro:"
+              echo "   1. Portainer → Stacks → Add Stack (nome: dash-tg)"
+              echo "   2. Aponte para docker-compose.prod.yml do repo"
+              echo "   3. Env var: IMAGE=ghcr.io/brunerars/dash-tg"
+              echo "   4. Deploy → depois o CI/CD atualiza automaticamente"
+              docker service ls
+              exit 1
             fi
 
             echo "🚀 Atualizando serviço (${SERVICE})..."
