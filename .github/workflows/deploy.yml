@@ -137,31 +137,13 @@ jobs:
             if [ -z "${SERVICE}" ]; then
               echo "⚠️ Serviço não encontrado (${SERVICE_EXPECTED}). Criando stack 'dash-tg' (primeira vez)..."
 
-              IMAGE="${IMAGE}" docker stack deploy -c - dash-tg <<'EOF'
-              version: "3.8"
+              COMPOSE_FILE="/tmp/dash-tg-compose.yml"
+              printf 'version: "3.8"\n\nservices:\n  dashboard:\n    image: "%s:latest"\n    networks:\n      - network_public\n    deploy:\n      replicas: 1\n      restart_policy:\n        condition: on-failure\n      labels:\n        - traefik.enable=true\n        - traefik.docker.network=network_public\n        - "traefik.http.routers.dash_tg.rule=Host(\\`dash-tg.arvsystems.cloud\\`)"\n        - traefik.http.routers.dash_tg.entrypoints=websecure\n        - traefik.http.routers.dash_tg.tls.certresolver=letsencryptresolver\n        - traefik.http.services.dash_tg.loadbalancer.server.port=8501\n\nnetworks:\n  network_public:\n    external: true\n' "${IMAGE}" > "${COMPOSE_FILE}"
 
-              services:
-                dashboard:
-                  image: "${IMAGE}:latest"
-                  networks:
-                    - network_public
-                  deploy:
-                    replicas: 1
-                    restart_policy:
-                      condition: on-failure
-                    labels:
-                      - traefik.enable=true
-                      - traefik.docker.network=network_public
-                      - traefik.http.routers.dash_tg.rule=Host(`dash-tg.arvsystems.cloud`)
-                      - traefik.http.routers.dash_tg.entrypoints=websecure
-                      - traefik.http.routers.dash_tg.tls.certresolver=letsencryptresolver
-                      - traefik.http.services.dash_tg.loadbalancer.server.port=8501
+              docker stack deploy -c "${COMPOSE_FILE}" --with-registry-auth dash-tg
+              rm -f "${COMPOSE_FILE}"
 
-              networks:
-                network_public:
-                  external: true
-              EOF
-
+              sleep 5
               SERVICE="$(resolve_service "${SERVICE_EXPECTED}" "dashboard")" || {
                 echo "❌ Stack criada, mas o serviço ainda não apareceu. Serviços disponíveis:"
                 docker service ls
