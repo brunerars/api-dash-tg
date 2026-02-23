@@ -1,0 +1,22 @@
+version: "3.8"
+
+services:
+  dashboard:
+    image: ${IMAGE:?IMAGE is required (ex: ghcr.io/brunerars/dash-tg)}:latest
+    networks:
+      - network_public
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      labels:
+        - traefik.enable=true
+        - traefik.docker.network=network_public
+        - traefik.http.routers.dash_tg.rule=Host(`dash-tg.arvsystems.cloud`)
+        - traefik.http.routers.dash_tg.entrypoints=websecure
+        - traefik.http.routers.dash_tg.tls.certresolver=letsencryptresolver
+        - traefik.http.services.dash_tg.loadbalancer.server.port=8501
+
+networks:
+  network_public:
+    external: true
