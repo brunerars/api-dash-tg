@@ -76,6 +76,22 @@ jobs:
       packages: read
 
     steps:
+      - name: Validar secrets de deploy
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.VPS_HOST }}" ]; then
+            echo "Secret ausente: VPS_HOST"
+            exit 1
+          fi
+          if [ -z "${{ secrets.VPS_USER }}" ]; then
+            echo "Secret ausente: VPS_USER"
+            exit 1
+          fi
+          if [ -z "${{ secrets.VPS_SSH_KEY }}" ]; then
+            echo "Secret ausente: VPS_SSH_KEY"
+            exit 1
+          fi
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
         with:
