@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   dashboard:
-    image: "${IMAGE:?IMAGE is required (ex ghcr.io/brunerars/dash-tg)}:latest"
+    image: ${IMAGE}:latest
     networks:
       - network_public
     deploy:
