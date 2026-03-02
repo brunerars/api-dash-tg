@@ -1,7 +1,7 @@
 version: "3.8"
 
 services:
-  dashboard:
+  api:
     image: ${IMAGE}:latest
     environment:
       - API_KEYS=${API_KEYS}
@@ -10,6 +10,8 @@ services:
       - CACHE_TTL_EXPORT=${CACHE_TTL_EXPORT:-3600}
     networks:
       - network_public
+    volumes:
+      - /opt/api-esoccer/data:/app/data:ro
     deploy:
       replicas: 1
       restart_policy:
@@ -17,10 +19,10 @@ services:
       labels:
         - traefik.enable=true
         - traefik.docker.network=network_public
-        - traefik.http.routers.dash_tg.rule=Host(`dash-tg.arvsystems.cloud`)
-        - traefik.http.routers.dash_tg.entrypoints=websecure
-        - traefik.http.routers.dash_tg.tls.certresolver=letsencryptresolver
-        - traefik.http.services.dash_tg.loadbalancer.server.port=8000
+        - traefik.http.routers.api_esoccer.rule=Host(`api-esoccer.arvsystems.cloud`)
+        - traefik.http.routers.api_esoccer.entrypoints=websecure
+        - traefik.http.routers.api_esoccer.tls.certresolver=letsencryptresolver
+        - traefik.http.services.api_esoccer.loadbalancer.server.port=8000
 
   redis:
     image: redis:7-alpine

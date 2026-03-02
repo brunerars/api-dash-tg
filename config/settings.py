@@ -11,3 +11,5 @@ REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379")
 
 CACHE_TTL_ANALYSIS: int = int(os.getenv("CACHE_TTL_ANALYSIS", "86400"))
 CACHE_TTL_EXPORT: int = int(os.getenv("CACHE_TTL_EXPORT", "3600"))
+
+DATA_DIR: str = os.getenv("DATA_DIR", "/app/data")

@@ -86,7 +86,7 @@ def test_analyze():
         d = duplas[0]
         # Campos obrigatórios — Over/HT deve ter "linha"
         campos = [
-            "dupla", "linha", "ligas", "quantidade_entradas", "quantidade_greens",
+            "dupla", "linha", "ligas", "fontes", "quantidade_entradas", "quantidade_greens",
             "percentual_green", "pontuacao", "ultimos_6", "pct_green_10",
             "quantidade_reds", "max_reds", "reds_apos_red", "sistema_red_pct",
             "srpt", "sequencia_atual_g", "max_greens", "lucro_prej_total",
@@ -98,10 +98,12 @@ def test_analyze():
         assert d["quantidade_entradas"] >= 4, "Filtro min_jogos=4 violado"
         assert d["percentual_green"] >= 65.0, "Filtro min_green_pct=65 violado"
         assert isinstance(d["linha"], str) and len(d["linha"]) > 0, "Campo 'linha' vazio ou inválido"
+        assert isinstance(d["fontes"], list) and len(d["fontes"]) >= 1, "fontes deve ser lista não-vazia"
+        assert all(isinstance(f, str) for f in d["fontes"]), "cada fonte deve ser string"
 
         print("\nPrimeira dupla:")
         print(json.dumps(d, indent=2, ensure_ascii=False))
-        print(f"[OK] Estrutura da dupla validada (17 campos com 'linha')")
+        print(f"[OK] Estrutura da dupla validada (18 campos com 'linha', fontes={d['fontes']})")
         print(f"[OK] Linha de mercado: {d['linha']}")
 
     return data.get("cache_key")

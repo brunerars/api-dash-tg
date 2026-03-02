@@ -161,6 +161,8 @@ def compute_metrics(
 
         lucro_total = float(pd.to_numeric(g["Lucro/Prej."], errors="coerce").fillna(0.0).sum())
 
+        fontes: list[str] = sorted(g["__bet"].dropna().unique().tolist())
+
         # group_key é string quando group_by tem 1 coluna, tupla quando tem 2+
         if len(group_by) == 1:
             dupla_val = str(group_key)
@@ -172,6 +174,7 @@ def compute_metrics(
         row: dict = {
             "dupla": dupla_val,
             "ligas": _unique_in_order(g["Torneio"]),
+            "fontes": fontes,
             "quantidade_entradas": total,
             "quantidade_greens": greens,
             "percentual_green": float((greens / total) * 100.0) if total else 0.0,

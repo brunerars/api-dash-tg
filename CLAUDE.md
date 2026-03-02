@@ -301,13 +301,14 @@ df = df[df["percentual_green"] >= estrategia["min_green_pct"]]
 
 ## Colunas de Saída
 
-16 colunas padrão + coluna `linha` quando `group_by` inclui `"Linha"`.
+17 colunas padrão + coluna `linha` quando `group_by` inclui `"Linha"`.
 
 | Coluna | eSoccer | Over/HT |
 |--------|---------|---------|
 | ligas | ✓ | ✓ |
 | dupla | ✓ | ✓ |
 | linha | — | ✓ |
+| fontes | ✓ | ✓ |
 | quantidade_entradas | ✓ | ✓ |
 | quantidade_greens | ✓ | ✓ |
 | percentual_green | ✓ | ✓ |

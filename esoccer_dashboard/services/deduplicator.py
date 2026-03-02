@@ -37,23 +37,21 @@ def deduplicate_clusters(
         return DedupResult(df=df.copy(), total_jogos_apos_dedup=0)
 
     td = pd.Timedelta(minutes=window_minutes)
-    kept_groups: list[pd.DataFrame] = []
+    keep_indices: list[int] = []
 
-    grouped = df.sort_values("DataHora").groupby(dedup_key, sort=False)
+    df_sorted = df.sort_values("DataHora")
+    grouped = df_sorted.groupby(dedup_key, sort=False)
     for _, g in grouped:
-        g = g.sort_values("DataHora").copy()
+        g = g.sort_values("DataHora")
         diffs = g["DataHora"].diff()
         cluster_id = (diffs.isna() | (diffs > td)).cumsum()
-        g["__cluster_id"] = cluster_id.values
 
-        for _, cg in g.groupby("__cluster_id", sort=False):
+        for _, cg in g.groupby(cluster_id, sort=False):
             sources = cg["__source_file"].nunique(dropna=False)
             if sources >= 2:
-                idx = cg["DataHora"].idxmax()
-                kept_groups.append(cg.loc[[idx]].drop(columns=["__cluster_id"]))
+                keep_indices.append(int(cg["DataHora"].idxmax()))
             else:
-                kept_groups.append(cg.drop(columns=["__cluster_id"]))
+                keep_indices.extend(cg.index.tolist())
 
-    out = pd.concat(kept_groups, ignore_index=True)
-    out = out.sort_values([dedup_key[0], "DataHora"], kind="stable").reset_index(drop=True)
+    out = df.loc[keep_indices].sort_values([dedup_key[0], "DataHora"], kind="stable").reset_index(drop=True)
     return DedupResult(df=out, total_jogos_apos_dedup=int(len(out)))

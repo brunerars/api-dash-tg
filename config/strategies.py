@@ -14,6 +14,7 @@ def _translate(keys: list[str]) -> list[str]:
 
 ESTRATEGIAS: dict[str, dict] = {
     "eSoccer — Dupla": {
+        "slug": "esoccer",
         "group_by": ["Dupla"],
         "dedup_key": ["Dupla", "Data"],
         "min_jogos": 6,
@@ -22,6 +23,7 @@ ESTRATEGIAS: dict[str, dict] = {
         "descricao": "Analisa por confronto entre jogadores",
     },
     "Over/HT — Dupla + Linha": {
+        "slug": "overht",
         "group_by": ["Dupla", "Linha"],
         "dedup_key": ["Dupla", "Linha", "Data"],
         "min_jogos": 4,

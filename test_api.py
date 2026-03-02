@@ -87,7 +87,7 @@ def test_analyze():
         d = duplas[0]
         # Campos obrigatórios — eSoccer não tem "linha"
         campos = [
-            "dupla", "ligas", "quantidade_entradas", "quantidade_greens",
+            "dupla", "ligas", "fontes", "quantidade_entradas", "quantidade_greens",
             "percentual_green", "pontuacao", "ultimos_6", "pct_green_10",
             "quantidade_reds", "max_reds", "reds_apos_red", "sistema_red_pct",
             "srpt", "sequencia_atual_g", "max_greens", "lucro_prej_total",
@@ -99,10 +99,12 @@ def test_analyze():
         # Validações de valor
         assert d["quantidade_entradas"] >= 6, "Filtro min_jogos=6 violado"
         assert d["percentual_green"] >= 35.0, "Filtro min_green_pct=35 violado"
+        assert isinstance(d["fontes"], list) and len(d["fontes"]) >= 1, "fontes deve ser lista não-vazia"
+        assert all(isinstance(f, str) for f in d["fontes"]), "cada fonte deve ser string"
 
         print("\nPrimeira dupla:")
         print(json.dumps(d, indent=2, ensure_ascii=False))
-        print("[OK] Estrutura da dupla validada (16 campos, sem 'linha')")
+        print(f"[OK] Estrutura da dupla validada (17 campos, sem 'linha', fontes={d['fontes']})")
 
     return data.get("cache_key")
 

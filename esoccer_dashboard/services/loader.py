@@ -10,6 +10,21 @@ import pandas as pd
 SHEET_NAME = "Tips Enviadas"
 REQUIRED_COLUMNS = ("Torneio", "Confronto", "Data", "Hora", "Resultado", "Lucro/Prej.")
 
+_BET_PATTERNS: list[tuple[str, str]] = [
+    ("BETANO", "Betano"),
+    ("365", "365"),
+    ("SUPER", "Super"),
+]
+
+
+def _detect_bet(filename: str) -> str:
+    """Extrai o nome da casa de apostas do nome do arquivo."""
+    stem = filename.upper()
+    for pattern, label in _BET_PATTERNS:
+        if pattern in stem:
+            return label
+    return filename.rsplit(".", 1)[0]
+
 
 class UploadedLike(Protocol):
     name: str
@@ -92,6 +107,7 @@ def load_tips_enviadas(files: Iterable[UploadedLike]) -> LoadResult:
         _optional = [c for c in ("Linha",) if c in df.columns]
         df = df.loc[:, list(REQUIRED_COLUMNS) + _optional].copy()
         df["__source_file"] = source_name
+        df["__bet"] = _detect_bet(source_name)
 
         df["Data"] = _parse_date_series(df["Data"])
         df["Hora"] = _parse_time_series(df["Hora"])

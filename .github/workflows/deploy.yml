@@ -1,4 +1,4 @@
-name: CI/CD — dash-tg (Fast Build & Deploy)
+name: CI/CD — api-esoccer (Fast Build & Deploy)
 
 on:
   push:
@@ -7,10 +7,10 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE: ghcr.io/${{ github.repository_owner }}/dash-tg
+  IMAGE: ghcr.io/${{ github.repository_owner }}/api-esoccer
 
 concurrency:
-  group: deploy-dash-tg-${{ github.ref }}
+  group: deploy-api-esoccer-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -104,11 +104,9 @@ jobs:
             set -e
 
             IMAGE="${{ env.IMAGE }}"
-            SERVICE_EXPECTED="dash-tg_dashboard"
+            SERVICE_EXPECTED="api-esoccer_api"
 
             resolve_service() {
-              # Resolve service name by exact expected name; fallback by suffix match.
-              # Usage: resolve_service "<expected>" "<suffix>"
               expected="$1"
               suffix="$2"
 
@@ -117,7 +115,6 @@ jobs:
                 return 0
               fi
 
-              # Fallback: find any service that ends with "_<suffix>"
               found="$(docker service ls --format '{{.Name}}' | grep -E "_${suffix}$" | head -n 1 || true)"
               if [ -n "${found}" ]; then
                 echo "${found}"
@@ -134,13 +131,14 @@ jobs:
             docker pull "${IMAGE}:latest"
 
             echo "🔎 Verificando stack/serviço..."
-            SERVICE="$(resolve_service "${SERVICE_EXPECTED}" "dashboard")" || true
+            SERVICE="$(resolve_service "${SERVICE_EXPECTED}" "api")" || true
 
             if [ -z "${SERVICE}" ]; then
-              echo "❌ Stack 'dash-tg' não existe. Crie no Portainer primeiro:"
-              echo "   1. Portainer → Stacks → Add Stack (nome: dash-tg)"
+              echo "❌ Stack 'api-esoccer' não existe. Crie no Portainer primeiro:"
+              echo "   1. Portainer → Stacks → Add Stack (nome: api-esoccer)"
               echo "   2. Aponte para docker-compose.prod.yml do repo"
-              echo "   3. Env var: IMAGE=ghcr.io/brunerars/dash-tg"
+              echo "   3. Env vars: IMAGE=ghcr.io/${{ github.repository_owner }}/api-esoccer"
+              echo "              API_KEYS=<suas_chaves>"
               echo "   4. Deploy → depois o CI/CD atualiza automaticamente"
               docker service ls
               exit 1

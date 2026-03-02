@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
 from typing import Annotated
 
 import pandas as pd
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
+from config.settings import DATA_DIR
 from config.strategies import ESTRATEGIAS, get_strategy_internal
 from esoccer_dashboard.services.cache import (
     delete_cache_key,
@@ -40,47 +43,16 @@ class _UploadFileAdapter:
 
 
 # ---------------------------------------------------------------------------
-# GET /strategies
+# Helper interno: pipeline completo dado files_contents já em memória
 # ---------------------------------------------------------------------------
-@router.get("/strategies")
-def list_strategies() -> dict:
-    return {
-        "strategies": [
-            {
-                "id": name,
-                "descricao": cfg["descricao"],
-                "min_jogos": cfg["min_jogos"],
-                "min_green_pct": cfg["min_green_pct"],
-            }
-            for name, cfg in ESTRATEGIAS.items()
-        ]
-    }
-
-
-# ---------------------------------------------------------------------------
-# POST /analyze
-# ---------------------------------------------------------------------------
-@router.post("/analyze")
-async def analyze(
-    _key: AuthDep,
-    files: list[UploadFile] = File(...),
-    strategy: str = Form(...),
+async def _analyze_with_strategy(
+    strategy_name: str,
+    files_contents: list[tuple[str, bytes]],
 ) -> dict:
-    estrategia = get_strategy_internal(strategy)
-    if estrategia is None:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Estratégia '{strategy}' não encontrada. Use GET /strategies para listar as disponíveis.",
-        )
-
-    # Ler bytes de todos os arquivos
-    files_contents: list[tuple[str, bytes]] = []
-    for uf in files:
-        content = await uf.read()
-        files_contents.append((uf.filename or "arquivo.xlsx", content))
+    estrategia = get_strategy_internal(strategy_name)  # garantido válido pelo chamador
 
     files_bytes = [c for _, c in files_contents]
-    cache_key = gerar_cache_key(files_bytes, strategy)
+    cache_key = gerar_cache_key(files_bytes, strategy_name)
 
     def compute() -> dict:
         adapters = [_UploadFileAdapter(name, content) for name, content in files_contents]
@@ -124,7 +96,7 @@ async def analyze(
 
         return {
             "cache_key": cache_key,
-            "strategy": strategy,
+            "strategy": strategy_name,
             "total_jogos_brutos": load_result.total_jogos_brutos,
             "total_jogos_apos_dedup": dedup_result.total_jogos_apos_dedup,
             "duplas": duplas,
@@ -133,6 +105,85 @@ async def analyze(
     result, cache_hit = get_or_compute(cache_key, compute)
     result["cache_hit"] = cache_hit
     return result
+
+
+# ---------------------------------------------------------------------------
+# GET /strategies
+# ---------------------------------------------------------------------------
+@router.get("/strategies")
+def list_strategies() -> dict:
+    return {
+        "strategies": [
+            {
+                "id": name,
+                "descricao": cfg["descricao"],
+                "min_jogos": cfg["min_jogos"],
+                "min_green_pct": cfg["min_green_pct"],
+            }
+            for name, cfg in ESTRATEGIAS.items()
+        ]
+    }
+
+
+# ---------------------------------------------------------------------------
+# POST /analyze  (upload de arquivos)
+# ---------------------------------------------------------------------------
+@router.post("/analyze")
+async def analyze(
+    _key: AuthDep,
+    files: list[UploadFile] = File(...),
+    strategy: str = Form(...),
+) -> dict:
+    if get_strategy_internal(strategy) is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Estratégia '{strategy}' não encontrada. Use GET /strategies para listar as disponíveis.",
+        )
+
+    files_contents: list[tuple[str, bytes]] = []
+    for uf in files:
+        content = await uf.read()
+        files_contents.append((uf.filename or "arquivo.xlsx", content))
+
+    return await _analyze_with_strategy(strategy, files_contents)
+
+
+# ---------------------------------------------------------------------------
+# POST /analyze/default  (usa arquivos pré-carregados no servidor)
+# ---------------------------------------------------------------------------
+class DefaultAnalyzeRequest(BaseModel):
+    strategy: str
+
+
+@router.post("/analyze/default")
+async def analyze_default(_key: AuthDep, body: DefaultAnalyzeRequest) -> dict:
+    """
+    Analisa usando os arquivos .xlsx pré-carregados no servidor.
+    Os arquivos ficam em DATA_DIR/<slug>/ (ex: /app/data/esoccer/).
+    Não requer upload — ideal para o frontend durante o desenvolvimento.
+    """
+    estrategia = get_strategy_internal(body.strategy)
+    if estrategia is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Estratégia '{body.strategy}' não encontrada. Use GET /strategies para listar as disponíveis.",
+        )
+
+    slug = estrategia["slug"]
+    data_path = Path(DATA_DIR) / slug
+    xlsx_files = sorted(data_path.glob("*.xlsx"))
+
+    if not xlsx_files:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"Nenhum arquivo .xlsx encontrado em '{data_path}'. "
+                f"Copie os arquivos para DATA_DIR/{slug}/ no servidor."
+            ),
+        )
+
+    files_contents = [(p.name, p.read_bytes()) for p in xlsx_files]
+    return await _analyze_with_strategy(body.strategy, files_contents)
 
 
 def _store_xlsx(df: pd.DataFrame, cache_key: str) -> None:

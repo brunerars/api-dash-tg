@@ -108,6 +108,9 @@ def normalize_dupla(confronto: str) -> str:
 
 def add_dupla_normalizada(df: pd.DataFrame, confronto_col: str = "Confronto") -> pd.DataFrame:
     out = df.copy()
-    out["DuplaNormalizada"] = out[confronto_col].map(normalize_dupla)
+    # Mapear apenas os valores únicos, não cada linha — muito mais rápido para datasets grandes
+    unique_vals = out[confronto_col].unique()
+    mapping = {v: normalize_dupla(v) for v in unique_vals}
+    out["DuplaNormalizada"] = out[confronto_col].map(mapping)
     return out
 
