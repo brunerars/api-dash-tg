@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   api:
-    image: ${IMAGE}:latest
+    image: ghcr.io/brunerars/api-esoccer:latest
     environment:
       - API_KEYS=${API_KEYS}
       - REDIS_URL=redis://redis:6379
