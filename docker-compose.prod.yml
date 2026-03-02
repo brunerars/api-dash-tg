@@ -3,6 +3,11 @@ version: "3.8"
 services:
   dashboard:
     image: ${IMAGE}:latest
+    environment:
+      - API_KEYS=${API_KEYS}
+      - REDIS_URL=redis://redis:6379
+      - CACHE_TTL_ANALYSIS=${CACHE_TTL_ANALYSIS:-86400}
+      - CACHE_TTL_EXPORT=${CACHE_TTL_EXPORT:-3600}
     networks:
       - network_public
     deploy:
@@ -15,8 +20,26 @@ services:
         - traefik.http.routers.dash_tg.rule=Host(`dash-tg.arvsystems.cloud`)
         - traefik.http.routers.dash_tg.entrypoints=websecure
         - traefik.http.routers.dash_tg.tls.certresolver=letsencryptresolver
-        - traefik.http.services.dash_tg.loadbalancer.server.port=8501
+        - traefik.http.services.dash_tg.loadbalancer.server.port=8000
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - network_public
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.role == manager
 
 networks:
   network_public:
     external: true
+
+volumes:
+  redis_data:

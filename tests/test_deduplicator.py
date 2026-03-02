@@ -27,7 +27,7 @@ def test_dedup_keeps_latest_when_multiple_sources_in_cluster():
         ]
     )
 
-    res = deduplicate_clusters(df, window_minutes=5)
+    res = deduplicate_clusters(df, dedup_key=["DuplaNormalizada", "Data"], window_minutes=5)
     assert len(res.df) == 2
     assert res.df["DataHora"].tolist() == [
         pd.Timestamp("2026-01-20 10:03:00"),
@@ -53,7 +53,7 @@ def test_dedup_does_not_collapse_single_source_cluster():
         ]
     )
 
-    res = deduplicate_clusters(df, window_minutes=5)
+    res = deduplicate_clusters(df, dedup_key=["DuplaNormalizada", "Data"], window_minutes=5)
     assert len(res.df) == 2
 
 
@@ -75,6 +75,6 @@ def test_dedup_does_not_cluster_when_gap_gt_window():
         ]
     )
 
-    res = deduplicate_clusters(df, window_minutes=5)
+    res = deduplicate_clusters(df, dedup_key=["DuplaNormalizada", "Data"], window_minutes=5)
     assert len(res.df) == 2
 

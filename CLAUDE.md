@@ -1,172 +1,190 @@
-# CLAUDE.md — Dashboard de Análise eSoccer
+# CLAUDE.md v3 — Backend FastAPI + Redis — dash-tg
 
-## Visão Geral do Projeto
+## Visão Geral
 
-Dashboard web para análise estatística de duplas de eSoccer (FIFA) a partir de planilhas exportadas de bots de apostas.
-O usuário faz upload de uma ou mais planilhas `.xlsx`, o sistema processa, deduplica, calcula métricas e exibe um dashboard interativo.
+API backend para o dashboard de análise eSoccer multi-estratégia.
+Consome planilhas `.xlsx`, processa métricas e serve resultados via HTTP com cache Redis.
+O frontend (qualquer tecnologia) consome a API hospedada na VPS sem dependência da engine.
 
 ---
 
-## Stack Tecnológica
+## Stack
 
-| Camada     | Tecnologia              |
-|------------|------------------------|
-| Backend    | FastAPI + Python 3.11  |
-| Processamento | pandas + openpyxl   |
-| Frontend   | Next.js 14 (App Router) + TailwindCSS |
-| Tabelas    | TanStack Table v8      |
-| Deploy     | Docker Compose         |
-
-> Alternativa rápida: substituir Next.js por Streamlit para entrega em 2-3 dias.
+| Camada | Tecnologia |
+|--------|-----------|
+| Backend | FastAPI + Python 3.11 |
+| Processamento | pandas + openpyxl |
+| Cache | Redis 7 + redis-py |
+| Autenticação | API Key via header `X-API-Key` |
+| Deploy | Docker Compose na VPS |
+| Documentação | Swagger automático (`/docs`) |
 
 ---
 
 ## Estrutura de Pastas
 
 ```
-esoccer-dashboard/
-├── backend/
-│   ├── main.py                  # FastAPI app
-│   ├── routers/
-│   │   └── analysis.py          # POST /analyze
-│   ├── services/
-│   │   ├── loader.py            # Leitura das planilhas
-│   │   ├── deduplicator.py      # Etapa de deduplicação (ISOLADA)
-│   │   ├── normalizer.py        # Normalização de nomes de duplas
-│   │   └── metrics.py           # Cálculo de todas as métricas
-│   ├── models/
-│   │   └── schemas.py           # Pydantic schemas
-│   └── requirements.txt
-├── frontend/
-│   ├── app/
-│   │   ├── page.tsx             # Upload + Dashboard
-│   │   └── components/
-│   │       ├── UploadZone.tsx
-│   │       ├── AnalysisTable.tsx
-│   │       └── FiltersBar.tsx
-│   └── package.json
+dash-tg/
+├── main.py
+├── routers/
+│   └── analysis.py
+├── esoccer_dashboard/services/
+│   ├── loader.py          # leitura dos .xlsx
+│   ├── normalizer.py      # normalização de duplas
+│   ├── deduplicator.py    # cluster ≤ 5 min — recebe dedup_key da estratégia
+│   ├── metrics.py         # cálculo das 16 métricas — recebe config da estratégia
+│   └── cache.py           # integração Redis
+├── config/
+│   ├── strategies.py      # fonte da verdade — parâmetros completos por estratégia
+│   └── settings.py        # variáveis de ambiente
+├── middleware/
+│   └── auth.py            # validação API Key
+├── tests/
+│   └── test_deduplicator.py
 ├── docker-compose.yml
-└── CLAUDE.md
+├── Dockerfile
+├── requirements.txt
+└── .env.example
 ```
 
 ---
 
-## Regras de Negócio Críticas (NÃO ALTERAR)
+## Configuração de Estratégias (`config/strategies.py`)
 
-### 1. Fonte de Dados
-- Ler **apenas** a aba `Tips Enviadas` de cada arquivo `.xlsx`
-- Colunas obrigatórias: `Torneio`, `Confronto`, `Data`, `Hora`, `Resultado`, `Lucro/Prej.`
-
-### 2. Normalização de Duplas
-- Ordenar nomes alfabeticamente: `"Force vs Agent"` → `"Agent vs Force"`
-- Preservar sufixos: `(2x6)`, `(ECF Volta)`, `(ECF)`
-- Tratar como mesma dupla: `"Cevuu vs Elmagico (2x6) (2x6)"` = `"Cevuu (2x6) vs Elmagico (2x6)"`
-- Lógica: extrair sufixos por jogador, reordenar e recompor
-
-### 3. Deduplicação (ETAPA OBRIGATÓRIA ANTES DE QUALQUER CÁLCULO)
-
-```
-ORDEM DE EXECUÇÃO — NÃO QUEBRAR ESTA SEQUÊNCIA:
-1. Ler todos os arquivos
-2. Filtrar apenas aba "Tips Enviadas"
-3. Criar coluna DataHora (Data + Hora)
-4. Criar coluna Dupla normalizada
-5. Executar deduplicação completa por cluster ≤ 5 minutos
-6. Congelar o dataset (nenhuma linha pode ser adicionada depois)
-7. Iniciar os cálculos de métricas
-```
-
-**Regra do cluster:**
-- Mesma Dupla normalizada
-- Mesmo dia (Data idêntica)
-- Diferença de horário ≤ 5 minutos entre linhas de arquivos diferentes
-- Manter apenas a linha com horário **mais tardio**
-
-**Proibições absolutas:**
-- ❌ Somar jogos antes da deduplicação completa
-- ❌ Aplicar filtros mínimos antes da deduplicação
-- ❌ Contar bots diferentes como jogos distintos no mesmo cluster
-- ❌ Deduplicar apenas por DataHora exata (deve usar janela de 5 min)
-
-### 4. Filtros para exibição
-- Mínimo de **6 partidas** por dupla
-- Mínimo de **35% de acerto (GREEN)**
-
-### 5. Mapeamento de Resultados
-- `"Green"` → GREEN → `+1` ponto
-- `"Red"` → RED → `-3` pontos
-
----
-
-## Métricas a Calcular (por dupla)
-
-Todas calculadas **após** deduplicação, em ordem cronológica por `DataHora`.
-
-| Coluna                          | Lógica                                                                 |
-|---------------------------------|------------------------------------------------------------------------|
-| `Dupla`                         | Nome normalizado (A vs B ordenado alfabeticamente)                    |
-| `Ligas`                         | Torneios únicos na ordem de aparição, separados por ` / `             |
-| `Quantidade de entradas`        | Total de linhas da dupla                                               |
-| `Quantidade de GREENS`          | Count de resultados GREEN                                              |
-| `Percentual de GREEN (%)`       | GREENs / Total × 100                                                  |
-| `Pontuação (+1/–3)`             | Soma de +1 por GREEN e -3 por RED                                     |
-| `Últimos 6 jogos (G/R)`         | 6 jogos com maior DataHora → ex: `"G-R-G-G-R-G"`                     |
-| `%Green últimos 10`             | % GREEN nos últimos 10 jogos (ou menos se < 10)                       |
-| `Quantidade de REDS`            | Count de resultados RED                                                |
-| `Sequencia máxima de Reds`      | Maior streak de REDs consecutivos                                     |
-| `Reds após Red`                 | Qtd de vezes que RED foi seguido por outro RED no mesmo dia           |
-| `SISTEMA RED (%)`               | (Reds após Red no mesmo dia / Total de Reds) × 100                   |
-| `SRPT`                          | Score Recente Ponderado por Tempo (ver fórmula abaixo)                |
-| `Sequência Atual G`             | Greens consecutivos no final da sequência cronológica                 |
-| `Sequencia máxima de Greens`    | Maior streak de GREENs consecutivos                                   |
-| `Lucro/Prejuízo TOTAL`          | Soma da coluna `Lucro/Prej.` de todas as partidas da dupla           |
-
-### Fórmula SRPT
+**Fonte da verdade única.** Cada estratégia define seu comportamento completo.
+`metrics.py` e `deduplicator.py` recebem esses parâmetros — nunca têm valores hardcoded.
 
 ```python
-# Para cada dupla, ordenada por DataHora (mais antigo → mais recente)
-# Posição do último jogo = N-1 (índice 0-based do último)
-
-for i, jogo in enumerate(jogos_ordenados):
-    distancia = (N - 1) - i          # 0 para o último, 1 para o anterior...
-    peso = 0.5 ** (distancia / 10)   # meia-vida de 10 jogos
-    valor = +1 if jogo == 'Green' else -3
-
-SRPT = sum(peso * valor for cada jogo)
+ESTRATEGIAS = {
+    "eSoccer — Dupla": {
+        "group_by": ["Dupla"],
+        "dedup_key": ["Dupla", "Data"],
+        "min_jogos": 6,
+        "min_green_pct": 35,
+        "sistema_red_janela_horas": None,
+        "descricao": "Analisa por confronto entre jogadores",
+    },
+    "Over/HT — Dupla + Linha": {
+        "group_by": ["Dupla", "Linha"],
+        "dedup_key": ["Dupla", "Linha", "Data"],
+        "min_jogos": 4,
+        "min_green_pct": 65,
+        "sistema_red_janela_horas": 12,
+        "descricao": "Over e HT — analisa por confronto e linha de mercado",
+    },
+}
+# Para adicionar nova estratégia: apenas adicionar entrada aqui.
+# NUNCA alterar metrics.py ou deduplicator.py para isso.
 ```
+
+### Parâmetros documentados
+
+| Parâmetro | Tipo | Descrição |
+|-----------|------|-----------|
+| `group_by` | `list[str]` | Colunas de agrupamento para cálculo das métricas |
+| `dedup_key` | `list[str]` | Colunas usadas para identificar clusters de deduplicação |
+| `min_jogos` | `int` | Mínimo de jogos para exibição após dedup |
+| `min_green_pct` | `float` | Mínimo de % GREEN para exibição |
+| `sistema_red_janela_horas` | `int\|None` | `None` = só mesmo dia / `12` = mesmo dia OU até 12h entre jogos |
+
+> "Dupla" em `group_by`/`dedup_key` é shorthand de documentação.
+> `get_strategy_internal()` traduz para o nome real de coluna `DuplaNormalizada`.
+
+### Diferenças entre estratégias
+
+| Regra | eSoccer | Over/HT |
+|-------|---------|---------|
+| Agrupamento | Dupla | Dupla + Linha |
+| Cluster dedup | Dupla + Data | Dupla + Linha + Data |
+| Mínimo de jogos | 6 | 4 |
+| Mínimo % GREEN | 35% | 65% |
+| Sistema Red janela | mesmo dia | mesmo dia OU até 12h |
 
 ---
 
-## API Backend
+## Endpoints
 
 ### `POST /analyze`
 
-**Input:** multipart/form-data com um ou mais arquivos `.xlsx`
+Recebe os arquivos e a estratégia, verifica cache, processa se necessário.
 
-**Output:** JSON com lista de duplas e suas métricas
+**Headers:**
+```
+X-API-Key: {chave_do_cliente}
+Content-Type: multipart/form-data
+```
 
+**Body:**
+```
+files: [arquivo1.xlsx, arquivo2.xlsx, ...]
+strategy: "eSoccer — Dupla"
+```
+
+**Lógica interna:**
+```python
+# 1. Validar API Key
+# 2. Carregar config de ESTRATEGIAS[strategy] via get_strategy_internal()
+# 3. Gerar cache_key = MD5(bytes de todos os arquivos + strategy)
+# 4. Verificar Redis
+#    HIT  → retornar dados do cache imediatamente
+#    MISS → pipeline completo → salvar no Redis (TTL 24h) → retornar
+```
+
+**Response 200:**
 ```json
 {
+  "cache_hit": false,
+  "cache_key": "a3f8c2...",
+  "strategy": "Over/HT — Dupla + Linha",
   "total_jogos_brutos": 16163,
   "total_jogos_apos_dedup": 12847,
   "duplas": [
     {
       "dupla": "Agent vs Force",
+      "linha": "Over 0.5 HT",
       "ligas": "Liga A / Liga B",
-      "quantidade_entradas": 24,
-      "quantidade_greens": 14,
-      "percentual_green": 58.3,
-      "pontuacao": -16,
-      "ultimos_6": "G-R-G-G-R-G",
-      "pct_green_10": 60.0,
-      "quantidade_reds": 10,
-      "max_reds": 3,
-      "reds_apos_red": 4,
-      "sistema_red_pct": 40.0,
-      "srpt": 1.23,
-      "sequencia_atual_g": 2,
-      "max_greens": 5,
-      "lucro_prej_total": 2.03
+      "quantidade_entradas": 12,
+      "quantidade_greens": 9,
+      "percentual_green": 75.0,
+      "pontuacao": 0,
+      "ultimos_6": "G-G-R-G-G-G",
+      "pct_green_10": 70.0,
+      "quantidade_reds": 3,
+      "max_reds": 1,
+      "reds_apos_red": 1,
+      "sistema_red_pct": 33.3,
+      "srpt": 2.14,
+      "sequencia_atual_g": 3,
+      "max_greens": 4,
+      "lucro_prej_total": 5.20
+    }
+  ]
+}
+```
+
+> O campo `"linha"` só aparece quando `group_by` da estratégia inclui `"Linha"`.
+
+---
+
+### `GET /strategies`
+
+Lista as estratégias disponíveis com seus parâmetros principais.
+
+**Response 200:**
+```json
+{
+  "strategies": [
+    {
+      "id": "eSoccer — Dupla",
+      "descricao": "Analisa por confronto entre jogadores",
+      "min_jogos": 6,
+      "min_green_pct": 35
+    },
+    {
+      "id": "Over/HT — Dupla + Linha",
+      "descricao": "Over e HT — analisa por confronto e linha de mercado",
+      "min_jogos": 4,
+      "min_green_pct": 65
     }
   ]
 }
@@ -174,77 +192,212 @@ SRPT = sum(peso * valor for cada jogo)
 
 ---
 
-## Frontend — Funcionalidades
+### `GET /export/{cache_key}`
 
-### Tela Principal
-1. **Upload Zone** — drag & drop ou clique para selecionar múltiplos `.xlsx`
-2. **Botão Analisar** — dispara `POST /analyze`
-3. **Tabela de Resultados** com:
-   - Todas as colunas da análise
-   - Ordenação por qualquer coluna
-   - Filtros: % Green mínimo, SRPT mínimo, Ligas
-   - Highlight: verde para GREEN alto, vermelho para RED alto
-   - Exportar resultado como `.xlsx`
+Retorna o resultado de uma análise já processada como arquivo `.xlsx` para download.
+O `cache_key` é retornado no response do `/analyze`.
 
-### Visual
-- Dark theme (estética tech — alinhado com BetChecker)
-- Cores: verde para bons indicadores, vermelho para ruins, cinza para neutro
-
----
-
-## Validações e Edge Cases
-
-- Arquivo sem aba `Tips Enviadas` → erro com mensagem clara
-- Duplas com sufixos misturados `(2x6)` → normalizar antes de deduplicar
-- Coluna `Hora` como objeto time ou string → normalizar para `HH:MM:SS`
-- Coluna `Data` como datetime ou string → normalizar para `YYYY-MM-DD`
-- `Lucro/Prej.` com vírgula decimal (padrão BR) → converter para float
-- Dupla com < 6 jogos após dedup → excluir do resultado
-- Dupla com < 35% GREEN após dedup → excluir do resultado
-
----
-
-## Fluxo de Implementação Sugerido
-
+**Headers:**
 ```
-Sprint 1 (Dia 1-2): Backend Core
-  - loader.py: leitura de múltiplos .xlsx
-  - normalizer.py: normalização de nomes de duplas
-  - deduplicator.py: cluster ≤ 5 min
-  - Testes unitários de deduplicação com os arquivos reais
+X-API-Key: {chave_do_cliente}
+```
 
-Sprint 2 (Dia 3-4): Métricas + API
-  - metrics.py: todas as 16 métricas
-  - FastAPI endpoint /analyze
-  - Validações e tratamento de erros
+**Response:** arquivo `.xlsx` como download direto.
 
-Sprint 3 (Dia 5-6): Frontend
-  - Upload + chamada à API
-  - Tabela com TanStack Table
-  - Filtros e ordenação
-  - Dark theme
+---
 
-Sprint 4 (Dia 7): Deploy + Entrega
-  - Docker Compose
-  - Testes com planilhas reais do cliente
-  - Ajustes finais
+### `GET /cache/status` *(admin)*
+
+Retorna saúde e estatísticas do Redis.
+
+**Response 200:**
+```json
+{
+  "status": "ok",
+  "total_chaves": 42,
+  "memoria_usada": "3.21 MB",
+  "hits": 318,
+  "misses": 44,
+  "hit_rate": "87.8%",
+  "uptime_horas": 72
+}
 ```
 
 ---
 
-## Observações para o Cursor
+### `DELETE /cache/{cache_key}` *(admin)*
 
-- **Não alterar** nenhuma lógica de negócio sem instrução explícita
-- **Não inventar** dados — apenas processar o que existe nas planilhas
-- A deduplicação é uma função pura e isolada — não misturar com cálculo de métricas
-- Sempre ordenar cronologicamente por `DataHora` antes de calcular sequências
-- `Últimos 6` = os 6 registros com **maior** DataHora após toda a dedup
+Invalida manualmente uma entrada do cache.
 
 ---
 
-## Arquivos de Referência
+## Regras de Negócio (NÃO ALTERAR)
 
-- `prompt_cliente.txt` — prompt completo com todas as regras de negócio
-- `Bot_287805_*.xlsx` — planilha de exemplo (365)
-- `Bot_286787_*.xlsx` — planilha de exemplo (Betano)
-- Ambas têm 26 colunas, aba `Tips Enviadas`, ~6k-9k linhas
+### Pipeline obrigatório (ordem inviolável)
+
+```
+1. Ler todos os arquivos → apenas aba "Tips Enviadas"
+2. Validar colunas obrigatórias
+3. Criar coluna DataHora (Data + Hora) — formato BR com segundos
+4. Criar coluna Dupla normalizada
+5. Executar deduplicação por cluster ≤ 5 minutos (usando dedup_key da estratégia)
+6. CONGELAR o dataset — nenhuma linha pode ser adicionada depois
+7. Calcular métricas com group_by da estratégia selecionada
+8. Aplicar filtros de exibição (min_jogos e min_green_pct da estratégia)
+```
+
+### Deduplicação (`deduplicator.py`)
+
+Recebe `dedup_key` como parâmetro da estratégia.
+
+```python
+def deduplicate_clusters(df, dedup_key: list[str], window_minutes=5) -> DedupResult:
+    # Cluster por: dedup_key + diferença de horário ≤ janela_minutos
+    # entre linhas de arquivos diferentes
+    # Manter apenas a linha com horário mais tardio
+```
+
+Regras invariáveis:
+- Diferença absoluta de horário ≤ 5 minutos
+- Manter linha com horário mais tardio
+- Roda antes de qualquer cálculo — sem exceções
+- Proibido deduplicar apenas por DataHora exata
+
+### Normalização de duplas (`normalizer.py`)
+
+- Ordenar nomes alfabeticamente
+- Preservar sufixos `(2x6)`, `(ECF Volta)`, `(ECF)` sem duplicar
+- `"Cevuu vs Elmagico (2x6) (2x6)"` → `"Cevuu (2x6) vs Elmagico (2x6)"`
+
+### Sistema Red
+
+```python
+def _reds_after_red(resultados, datas, datahoras, janela_horas):
+    # Se janela_horas is None:
+    #   contar RED seguido de RED apenas no mesmo dia (Data idêntica)
+    # Se janela_horas = 12:
+    #   contar RED seguido de RED se mesmo dia
+    #   OU se dias diferentes mas diferença entre DataHora ≤ 12h
+```
+
+### SRPT
+
+```python
+peso = 0.5 ** (distancia / 10)   # meia-vida 10 jogos
+valor = +1 if green else -3
+SRPT = sum(peso * valor)
+```
+
+### Filtros de exibição
+
+Valores lidos da estratégia — nunca hardcoded no router.
+
+```python
+df = df[df["quantidade_entradas"] >= estrategia["min_jogos"]]
+df = df[df["percentual_green"] >= estrategia["min_green_pct"]]
+```
+
+---
+
+## Colunas de Saída
+
+16 colunas padrão + coluna `linha` quando `group_by` inclui `"Linha"`.
+
+| Coluna | eSoccer | Over/HT |
+|--------|---------|---------|
+| ligas | ✓ | ✓ |
+| dupla | ✓ | ✓ |
+| linha | — | ✓ |
+| quantidade_entradas | ✓ | ✓ |
+| quantidade_greens | ✓ | ✓ |
+| percentual_green | ✓ | ✓ |
+| pontuacao | ✓ | ✓ |
+| ultimos_6 | ✓ | ✓ |
+| pct_green_10 | ✓ | ✓ |
+| quantidade_reds | ✓ | ✓ |
+| max_reds | ✓ | ✓ |
+| reds_apos_red | ✓ | ✓ |
+| sistema_red_pct | ✓ | ✓ |
+| srpt | ✓ | ✓ |
+| sequencia_atual_g | ✓ | ✓ |
+| max_greens | ✓ | ✓ |
+| lucro_prej_total | ✓ | ✓ |
+
+---
+
+## Cache (`services/cache.py`)
+
+### Geração da chave
+```python
+def gerar_cache_key(files_bytes: list[bytes], strategy: str) -> str:
+    h = hashlib.md5()
+    for b in sorted(files_bytes):  # sorted para ordem não importar
+        h.update(b)
+    h.update(strategy.encode())
+    return h.hexdigest()
+```
+
+### TTL por tipo de dado
+| Dado | TTL |
+|------|-----|
+| Resultado de análise | 24h |
+| Export `.xlsx` | 1h |
+| Lista de estratégias | sem expiração (estático) |
+
+---
+
+## Autenticação (`middleware/auth.py`)
+
+```python
+API_KEYS = set(os.getenv("API_KEYS", "").split(","))
+
+async def verify_api_key(x_api_key: str = Header(...)):
+    if x_api_key not in API_KEYS:
+        raise HTTPException(status_code=401, detail="API Key inválida")
+```
+
+---
+
+## Docker Compose
+
+```yaml
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: .env
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:
+```
+
+---
+
+## Variáveis de Ambiente (`.env`)
+
+```env
+API_KEYS=chave_cliente1,chave_cliente2
+REDIS_URL=redis://redis:6379
+CACHE_TTL_ANALYSIS=86400
+CACHE_TTL_EXPORT=3600
+```
+
+---
+
+## O que NÃO muda entre estratégias
+
+- Lógica de deduplicação (só o `dedup_key` muda)
+- Normalização de nomes de duplas
+- Fórmula SRPT (meia-vida 10 jogos)
+- Estrutura dos endpoints e formato do response
+- Para adicionar estratégia: apenas editar `config/strategies.py`

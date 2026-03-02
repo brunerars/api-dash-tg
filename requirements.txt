@@ -1,4 +1,8 @@
-streamlit
+fastapi
+uvicorn[standard]
+redis
+python-dotenv
+python-multipart
 pandas
 openpyxl
 python-dateutil

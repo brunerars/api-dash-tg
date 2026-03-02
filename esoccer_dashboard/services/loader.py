@@ -88,7 +88,9 @@ def load_tips_enviadas(files: Iterable[UploadedLike]) -> LoadResult:
         df = _normalize_columns(df)
         _ensure_required_columns(df, source_name)
 
-        df = df.loc[:, list(REQUIRED_COLUMNS)].copy()
+        # Manter colunas obrigatórias + opcionais presentes (ex: "Linha" para Over/HT)
+        _optional = [c for c in ("Linha",) if c in df.columns]
+        df = df.loc[:, list(REQUIRED_COLUMNS) + _optional].copy()
         df["__source_file"] = source_name
 
         df["Data"] = _parse_date_series(df["Data"])
