@@ -1,5 +1,11 @@
+data/
 Data/
 *.xlsx
+
+# Env files — nunca commitar
+.env
+.env.*
+!.env.example
 
 # Python
 .venv/
