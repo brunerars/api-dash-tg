@@ -10,8 +10,6 @@ services:
       - CACHE_TTL_EXPORT=${CACHE_TTL_EXPORT:-3600}
     networks:
       - network_public
-    volumes:
-      - /opt/api-esoccer/data:/app/data:ro
     deploy:
       replicas: 1
       restart_policy:
