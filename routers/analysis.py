@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import io
-from pathlib import Path
 from typing import Annotated
 
 import pandas as pd
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
-from config.settings import DATA_DIR
 from config.strategies import ESTRATEGIAS, get_strategy_internal
 from esoccer_dashboard.services.cache import (
     delete_cache_key,
@@ -110,8 +107,10 @@ async def _analyze_with_strategy(
 # ---------------------------------------------------------------------------
 # GET /strategies
 # ---------------------------------------------------------------------------
-@router.get("/strategies")
+@router.get("/strategies", tags=["análise"], summary="Listar estratégias disponíveis")
 def list_strategies() -> dict:
+    """Retorna as estratégias configuradas com seus parâmetros principais (`min_jogos`, `min_green_pct`).
+    Use o campo `id` como valor do campo `strategy` no `/analyze`."""
     return {
         "strategies": [
             {
@@ -128,7 +127,12 @@ def list_strategies() -> dict:
 # ---------------------------------------------------------------------------
 # POST /analyze  (upload de arquivos)
 # ---------------------------------------------------------------------------
-@router.post("/analyze")
+@router.post(
+    "/analyze",
+    tags=["análise"],
+    summary="Analisar arquivos (upload)",
+    response_description="Métricas calculadas por dupla, com `cache_key` para export posterior.",
+)
 async def analyze(
     _key: AuthDep,
     files: list[UploadFile] = File(...),
@@ -148,43 +152,6 @@ async def analyze(
     return await _analyze_with_strategy(strategy, files_contents)
 
 
-# ---------------------------------------------------------------------------
-# POST /analyze/default  (usa arquivos pré-carregados no servidor)
-# ---------------------------------------------------------------------------
-class DefaultAnalyzeRequest(BaseModel):
-    strategy: str
-
-
-@router.post("/analyze/default")
-async def analyze_default(_key: AuthDep, body: DefaultAnalyzeRequest) -> dict:
-    """
-    Analisa usando os arquivos .xlsx pré-carregados no servidor.
-    Os arquivos ficam em DATA_DIR/<slug>/ (ex: /app/data/esoccer/).
-    Não requer upload — ideal para o frontend durante o desenvolvimento.
-    """
-    estrategia = get_strategy_internal(body.strategy)
-    if estrategia is None:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Estratégia '{body.strategy}' não encontrada. Use GET /strategies para listar as disponíveis.",
-        )
-
-    slug = estrategia["slug"]
-    data_path = Path(DATA_DIR) / slug
-    xlsx_files = sorted(data_path.glob("*.xlsx"))
-
-    if not xlsx_files:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                f"Nenhum arquivo .xlsx encontrado em '{data_path}'. "
-                f"Copie os arquivos para DATA_DIR/{slug}/ no servidor."
-            ),
-        )
-
-    files_contents = [(p.name, p.read_bytes()) for p in xlsx_files]
-    return await _analyze_with_strategy(body.strategy, files_contents)
-
 
 def _store_xlsx(df: pd.DataFrame, cache_key: str) -> None:
     buf = io.BytesIO()
@@ -196,8 +163,10 @@ def _store_xlsx(df: pd.DataFrame, cache_key: str) -> None:
 # ---------------------------------------------------------------------------
 # GET /export/{cache_key}
 # ---------------------------------------------------------------------------
-@router.get("/export/{cache_key}")
+@router.get("/export/{cache_key}", tags=["export"], summary="Baixar resultado como .xlsx")
 def export_xlsx(_key: AuthDep, cache_key: str) -> StreamingResponse:
+    """Retorna o resultado de uma análise já processada como arquivo `.xlsx`.
+    O `cache_key` é obtido no response do `POST /analyze`. TTL do export: 1h."""
     xlsx_bytes = get_export(cache_key)
     if xlsx_bytes is None:
         raise HTTPException(
@@ -214,8 +183,9 @@ def export_xlsx(_key: AuthDep, cache_key: str) -> StreamingResponse:
 # ---------------------------------------------------------------------------
 # GET /cache/status
 # ---------------------------------------------------------------------------
-@router.get("/cache/status")
+@router.get("/cache/status", tags=["cache"], summary="Status do Redis")
 def cache_status(_key: AuthDep) -> dict:
+    """Retorna estatísticas do Redis: total de chaves, memória, hit rate e uptime."""
     try:
         return get_cache_stats()
     except Exception as exc:
@@ -225,8 +195,9 @@ def cache_status(_key: AuthDep) -> dict:
 # ---------------------------------------------------------------------------
 # DELETE /cache/{cache_key}
 # ---------------------------------------------------------------------------
-@router.delete("/cache/{cache_key}")
+@router.delete("/cache/{cache_key}", tags=["cache"], summary="Invalidar entrada do cache")
 def invalidate_cache(_key: AuthDep, cache_key: str) -> dict:
+    """Remove manualmente uma entrada do cache pelo `cache_key`."""
     deleted = delete_cache_key(cache_key)
     if not deleted:
         raise HTTPException(status_code=404, detail="Cache key não encontrada.")
