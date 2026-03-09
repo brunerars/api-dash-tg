@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+from datetime import date as date_type
 from typing import Annotated
 
 import pandas as pd
@@ -17,7 +18,7 @@ from esoccer_dashboard.services.cache import (
     store_export,
 )
 from esoccer_dashboard.services.deduplicator import deduplicate_clusters
-from esoccer_dashboard.services.loader import load_tips_enviadas
+from esoccer_dashboard.services.loader import LoadResult, load_tips_enviadas
 from esoccer_dashboard.services.metrics import compute_metrics
 from esoccer_dashboard.services.normalizer import add_dupla_normalizada
 from middleware.auth import verify_api_key
@@ -45,17 +46,34 @@ class _UploadFileAdapter:
 async def _analyze_with_strategy(
     strategy_name: str,
     files_contents: list[tuple[str, bytes]],
+    date_from: str | None = None,
+    date_to: str | None = None,
 ) -> dict:
     estrategia = get_strategy_internal(strategy_name)  # garantido válido pelo chamador
 
     files_bytes = [c for _, c in files_contents]
-    cache_key = gerar_cache_key(files_bytes, strategy_name)
+    cache_key = gerar_cache_key(files_bytes, strategy_name, date_from, date_to)
 
     def compute() -> dict:
         adapters = [_UploadFileAdapter(name, content) for name, content in files_contents]
 
         # 1. Carregar
         load_result = load_tips_enviadas(adapters)
+        df = load_result.df
+
+        # 1b. Filtrar por período (se informado) — antes da normalização e dedup
+        if date_from or date_to:
+            if date_from:
+                df = df[df["Data"] >= date_type.fromisoformat(date_from)]
+            if date_to:
+                df = df[df["Data"] <= date_type.fromisoformat(date_to)]
+            if df.empty:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Nenhum jogo encontrado no período especificado.",
+                )
+            df = df.reset_index(drop=True)
+            load_result = LoadResult(df=df, total_jogos_brutos=len(df))
 
         # 2. Normalizar dupla
         df = add_dupla_normalizada(load_result.df)
@@ -91,13 +109,18 @@ async def _analyze_with_strategy(
         # 7. Gerar e armazenar xlsx para export
         _store_xlsx(mdf, cache_key)
 
-        return {
+        result: dict = {
             "cache_key": cache_key,
             "strategy": strategy_name,
             "total_jogos_brutos": load_result.total_jogos_brutos,
             "total_jogos_apos_dedup": dedup_result.total_jogos_apos_dedup,
             "duplas": duplas,
         }
+        if date_from:
+            result["date_from"] = date_from
+        if date_to:
+            result["date_to"] = date_to
+        return result
 
     result, cache_hit = get_or_compute(cache_key, compute)
     result["cache_hit"] = cache_hit
@@ -137,6 +160,8 @@ async def analyze(
     _key: AuthDep,
     files: list[UploadFile] = File(...),
     strategy: str = Form(...),
+    date_from: str | None = Form(None, description="Data inicial do período (YYYY-MM-DD). Opcional."),
+    date_to: str | None = Form(None, description="Data final do período (YYYY-MM-DD). Opcional."),
 ) -> dict:
     if get_strategy_internal(strategy) is None:
         raise HTTPException(
@@ -144,12 +169,22 @@ async def analyze(
             detail=f"Estratégia '{strategy}' não encontrada. Use GET /strategies para listar as disponíveis.",
         )
 
+    for label, value in (("date_from", date_from), ("date_to", date_to)):
+        if value is not None:
+            try:
+                date_type.fromisoformat(value)
+            except ValueError:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"'{label}' inválido: '{value}'. Use o formato YYYY-MM-DD.",
+                )
+
     files_contents: list[tuple[str, bytes]] = []
     for uf in files:
         content = await uf.read()
         files_contents.append((uf.filename or "arquivo.xlsx", content))
 
-    return await _analyze_with_strategy(strategy, files_contents)
+    return await _analyze_with_strategy(strategy, files_contents, date_from, date_to)
 
 
 

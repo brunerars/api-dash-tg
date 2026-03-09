@@ -18,11 +18,20 @@ def get_redis_client() -> redis.Redis:
     return _client
 
 
-def gerar_cache_key(files_bytes: list[bytes], strategy: str) -> str:
+def gerar_cache_key(
+    files_bytes: list[bytes],
+    strategy: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> str:
     h = hashlib.md5()
     for b in sorted(files_bytes):
         h.update(b)
     h.update(strategy.encode())
+    if date_from:
+        h.update(date_from.encode())
+    if date_to:
+        h.update(date_to.encode())
     return h.hexdigest()
 
 
