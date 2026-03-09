@@ -179,6 +179,15 @@ async def analyze(
                     detail=f"'{label}' inválido: '{value}'. Use o formato YYYY-MM-DD.",
                 )
 
+    filenames = [uf.filename or "arquivo.xlsx" for uf in files]
+    seen = set()
+    duplicates = [f for f in filenames if f in seen or seen.add(f)]
+    if duplicates:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Arquivos com nome repetido não são permitidos: {duplicates}",
+        )
+
     files_contents: list[tuple[str, bytes]] = []
     for uf in files:
         content = await uf.read()
